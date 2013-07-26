@@ -353,30 +353,52 @@ public:
                         break;
                     }
                     // Get the query string, next page and results
-                    string query = "-";
                     Json::Value search_metadata = root.get("search_metadata", Json::Value::null);
-                    if (search_metadata != Json::Value::null)
-                        query = search_metadata.get("query", "-").asString();
-
-                    url = "http://search.twitter.com/search.json";
-                    url += root.get("next_page", "").asString();
+                    if (search_metadata == Json::Value::null)
+                        break;
+                    string query = search_metadata.get("query", "-").asString();
 
                     Json::Value results = root.get("statuses",  Json::Value::null);
-
                     if (results.size() == 0)
                         break;
 
                     for (uint i=0; i<results.size(); i++) {
                         Json::Value result = results[i];
                         string text = result.get("text", "").asString();
+                        string created_str = result.get("created_at", "").asString();
+                        int retweet_count = result.get("retweet_count", 0).asInt();
+                        string id_str = result.get("id_str", 0).asString();
+                        uint64 tweetid = std::strtoull(id_str.c_str(), NULL, 10);
+                        Json::Value user = result.get("user", Json::Value::null); 
+                        int userid = 0;
+                        string username = "";
+                        string location = "";
+                        if (user != Json::Value::null) 
+                        {
+                            userid = user.get("id", 0).asInt(); 
+                            username = user.get("screen_name", "").asString();
+                            location = user.get("location", "").asString();
+                        }
+                        struct tm tmlol = {0};
+                        strptime(created_str.c_str(), "%a %b %d %H:%M:%S %z %Y", &tmlol);
+                        time_t created_at = mktime(&tmlol);
 
                         // Copy string into results
-                        output.getStringRef(0).copy(query);
-                        output.getStringRef(1).copy(text);
+                        output.getNumericRef(0).copy(tweetid);
+                        output.getStringRef(1).copy(query);
+                        output.setInt(2, retweet_count);
+                        output.setTimestamp(3, getTimestampFromUnixTime(created_at));
+                        output.getStringRef(4).copy(text);
+                        output.setInt(5, userid);
+                        output.getStringRef(6).copy(username);
+                        output.getStringRef(7).copy(location);
                         output.next();
                     }
-                }
 
+                    // Get the next batch of results
+                    url = "https://api.twitter.com/1.1/search/tweets.json";
+                    url += search_metadata.get("next_results", "").asString();
+                }
                 curl_free(sstr);
             } while (input.next());
         } catch (std::exception &e) {
@@ -396,6 +418,12 @@ class TwitterSearchFactory : public TransformFunctionFactory
                               ColumnTypes &returnType)
     {
         argTypes.addVarchar();
+        returnType.addNumeric();
+        returnType.addVarchar();
+        returnType.addInt();
+        returnType.addTimestamp();
+        returnType.addVarchar();
+        returnType.addInt();
         returnType.addVarchar();
         returnType.addVarchar();
     }
@@ -405,8 +433,14 @@ class TwitterSearchFactory : public TransformFunctionFactory
                                SizedColumnTypes &returnType)
     {
         const VerticaType &t = argTypes.getColumnType(0);
+        returnType.addNumeric(20, 0, "tweet_id");
         returnType.addVarchar(t.getStringLength() + 50, "query"); // to account for URL encoding
+        returnType.addInt("retweet_count");
+        returnType.addTimestamp(20, "created_at");
         returnType.addVarchar(300, "text"); // tweet size <= 300
+        returnType.addInt("user_id");
+        returnType.addVarchar(20, "user_name");
+        returnType.addVarchar(50, "user_location");
     }
 };
 
