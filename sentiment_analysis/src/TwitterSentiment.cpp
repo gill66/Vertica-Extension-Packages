@@ -126,9 +126,17 @@ static string fetch_url(CURL *curl_handle, const char *url)
     /* some servers don't like requests that are made without a user-agent
        field, so we provide one */ 
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+
+    /* add header options */
+    struct curl_slist *slist=NULL;
+    slist = curl_slist_append(slist, "Authorization: Bearer AAAAAAAAAAAAAAAAAAAAAOi%2FSQAAAAAAN%2BnUG6AJx7eufTLv5uV3nVxVOdw%3DekDelyGUn1cq1nHIii2uwHaCp73wPr69FL5Lil0");
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, slist);
  
     /* get it! */ 
     curl_easy_perform(curl_handle);
+
+    /* free the list */
+    curl_slist_free_all(slist); 
             
     return chunk.str();
 }
@@ -247,7 +255,7 @@ public:
                 
             // Get the query string and results
             string query = root.get("query", "-").asString();
-            Json::Value results = root.get("results",  Json::Value::null);
+            Json::Value results = root.get("statuses",  Json::Value::null);
 
             for (uint i=0; i<results.size(); i++) {
                 Json::Value result = results[i];
@@ -333,7 +341,7 @@ public:
                 // URL encode the search string
                 char *sstr = curl_easy_escape(curl_handle, inStr.c_str(), 0);
 
-                string url = "http://search.twitter.com/search.json?q=";
+                string url = "https://api.twitter.com/1.1/search/tweets.json?q=";
                 url += sstr;
 
                 while(true) {
@@ -345,11 +353,15 @@ public:
                         break;
                     }
                     // Get the query string, next page and results
-                    string query = root.get("query", "-").asString();
+                    string query = "-";
+                    Json::Value search_metadata = root.get("search_metadata", Json::Value::null);
+                    if (search_metadata != Json::Value::null)
+                        query = search_metadata.get("query", "-").asString();
+
                     url = "http://search.twitter.com/search.json";
                     url += root.get("next_page", "").asString();
 
-                    Json::Value results = root.get("results",  Json::Value::null);
+                    Json::Value results = root.get("statuses",  Json::Value::null);
 
                     if (results.size() == 0)
                         break;
@@ -508,3 +520,5 @@ class SentimentFactory : public ScalarFunctionFactory
 };
 
 RegisterFactory(SentimentFactory);
+
+
