@@ -328,8 +328,8 @@ public:
                                   PartitionWriter &output)
     {
         // Basic error checking
-        if (input.getNumCols() != 1)
-            vt_report_error(0, "Function only accept 1 arguments, but %zu provided", 
+        if (input.getNumCols() != 3)
+            vt_report_error(0, "Function only accept 2 arguments, but %zu provided", 
                             input.getNumCols());
 
         try {
@@ -337,12 +337,22 @@ public:
             do {
                 // Get a copy of the input string
                 string  inStr = getStringSafe(input.getStringRef(0));
+                uint64 since_id = *input.getNumericRef(1).words;
+                uint64 max_id = *input.getNumericRef(2).words;
+
+                if (since_id > max_id && since_id != 0 && max_id != 0)
+                    vt_report_error(0, "since_id cannot be greater than max_id");
 
                 // URL encode the search string
                 char *sstr = curl_easy_escape(curl_handle, inStr.c_str(), 0);
 
-                string url = "https://api.twitter.com/1.1/search/tweets.json?q=";
-                url += sstr;
+                stringstream ss;
+                ss << "https://api.twitter.com/1.1/search/tweets.json?q=" << sstr;
+                if (since_id > 0)
+                    ss << "&since_id=" << since_id;
+                if (max_id > 0)
+                    ss << "&max_id=" << max_id;
+                string url = ss.str();
 
                 while(true) {
                     string contents = fetch_url(curl_handle, url.c_str());
@@ -364,7 +374,7 @@ public:
 
                     for (uint i=0; i<results.size(); i++) {
                         Json::Value result = results[i];
-                        string text = result.get("text", "").asString();
+                        string text = result.get("text", "").asString().substr(0, 500);
                         string created_str = result.get("created_at", "").asString();
                         int retweet_count = result.get("retweet_count", 0).asInt();
                         string id_str = result.get("id_str", 0).asString();
@@ -377,7 +387,7 @@ public:
                         {
                             userid = user.get("id", 0).asInt(); 
                             username = user.get("screen_name", "").asString();
-                            location = user.get("location", "").asString();
+                            location = user.get("location", "").asString().substr(0, 50);
                         }
                         struct tm tmlol = {0};
                         strptime(created_str.c_str(), "%a %b %d %H:%M:%S %z %Y", &tmlol);
@@ -385,9 +395,9 @@ public:
 
                         // Copy string into results
                         output.getNumericRef(0).copy(tweetid);
-                        output.getStringRef(1).copy(query);
+                        output.getStringRef(1).copy(inStr);
                         output.setInt(2, retweet_count);
-                        output.setTimestamp(3, getTimestampFromUnixTime(created_at));
+                        output.setTimestampTz(3, getTimestampTzFromUnixTime(created_at));
                         output.getStringRef(4).copy(text);
                         output.setInt(5, userid);
                         output.getStringRef(6).copy(username);
@@ -418,10 +428,12 @@ class TwitterSearchFactory : public TransformFunctionFactory
                               ColumnTypes &returnType)
     {
         argTypes.addVarchar();
+        argTypes.addNumeric();
+        argTypes.addNumeric();
         returnType.addNumeric();
         returnType.addVarchar();
         returnType.addInt();
-        returnType.addTimestamp();
+        returnType.addTimestampTz();
         returnType.addVarchar();
         returnType.addInt();
         returnType.addVarchar();
@@ -436,8 +448,8 @@ class TwitterSearchFactory : public TransformFunctionFactory
         returnType.addNumeric(20, 0, "tweet_id");
         returnType.addVarchar(t.getStringLength() + 50, "query"); // to account for URL encoding
         returnType.addInt("retweet_count");
-        returnType.addTimestamp(20, "created_at");
-        returnType.addVarchar(300, "text"); // tweet size <= 300
+        returnType.addTimestampTz(20, "created_at");
+        returnType.addVarchar(500, "text"); // tweet size <= 500
         returnType.addInt("user_id");
         returnType.addVarchar(20, "user_name");
         returnType.addVarchar(50, "user_location");
